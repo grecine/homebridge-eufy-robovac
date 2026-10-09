@@ -348,7 +348,7 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
       if (event.command === 'battery') {
         this.updateBatteryState().catch(e => this.logError('Failed to update battery state:', e));
       } else if (event.command === 'activity') {
-        const activity = event.value as string;
+        const activity = String(event.value);
         if (activity === 'Sleeping' || activity === 'completed') {
           const docked = EufyRobovacMatterAccessory.safeDockedState(this.robovac);
           const level = EufyRobovacMatterAccessory.safeBatteryLevel(this.robovac);
@@ -364,10 +364,22 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
           this.logInfo('activity changed to Recharge — transitioning to SeekingCharger state');
           this.updateOperationalState(OP_SEEKING_CHARGER).catch(e => this.logError('Failed to update state:', e));
           this.updateRunMode(RUN_IDLE).catch(e => this.logError('Failed to update state:', e));
+        } else if (activity === 'Cleaning' || activity === 'Running' || activity === 'cleaning') {
+          if (!this.robovac.goingHome()) {
+            this.logInfo(`activity changed to '${activity}' — transitioning to Running state`);
+            this.updateOperationalState(OP_RUNNING).catch(e => this.logError('Failed to update state:', e));
+            this.updateRunMode(RUN_CLEANING).catch(e => this.logError('Failed to update state:', e));
+          }
+        } else if (activity === 'Paused' || activity === 'paused') {
+          this.logInfo(`activity changed to '${activity}' — transitioning to Paused state`);
+          this.updateOperationalState(OP_PAUSED).catch(e => this.logError('Failed to update state:', e));
         } else {
           this.logDebug(`activity changed to '${activity}' — running full state sync`);
           this.syncState();
         }
+      } else if (event.command === 'docked') {
+        this.logInfo(`docked state changed to ${event.value} — syncing state`);
+        this.syncOperationalState();
       } else if (event.command === 'goHome') {
         if (event.value === false) {
           // goHome flag cleared — robot has stopped seeking charger, re-evaluate actual state
@@ -391,15 +403,19 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
           this.clearErrorState().catch(e => this.logError('Failed to clear error state:', e));
         }
       } else if (event.command === 'cleanSpeed') {
-        const speedMap: { [key: string]: number } = {
+        const speedMap: Record<string, number> = {
           'Quiet': CLEAN_SPEED_QUIET,
           'Standard': CLEAN_SPEED_STANDARD,
           'Turbo': CLEAN_SPEED_TURBO,
           'Max': CLEAN_SPEED_MAX,
+          '0': CLEAN_SPEED_QUIET,
+          '1': CLEAN_SPEED_STANDARD,
+          '2': CLEAN_SPEED_TURBO,
+          '3': CLEAN_SPEED_MAX,
         };
-        const cleanSpeed = speedMap[event.value as string];
+        const cleanSpeed = speedMap[String(event.value)];
         if (cleanSpeed !== undefined) {
-          this.logDebug(`clean speed changed to ${event.value}`);
+          this.logDebug(`clean speed changed to ${event.value} (mode ${cleanSpeed})`);
           this.updateCleanMode(cleanSpeed).catch(e => this.logError('Failed to update clean mode:', e));
         } else {
           this.logWarn(`unknown clean speed: ${event.value}`);
@@ -461,14 +477,20 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
         return;
       }
 
-      if (activity === 'Recharge') {
+      if (activity === 'Recharge' || this.robovac.goingHome()) {
         this.updateOperationalState(OP_SEEKING_CHARGER);
         this.updateRunMode(RUN_IDLE);
         return;
       }
 
-      if (this.robovac.goingHome()) {
-        this.updateOperationalState(OP_SEEKING_CHARGER);
+      if (activity === 'Cleaning' || activity === 'Running' || activity === 'cleaning') {
+        this.updateOperationalState(OP_RUNNING);
+        this.updateRunMode(RUN_CLEANING);
+        return;
+      }
+
+      if (activity === 'Paused' || activity === 'paused') {
+        this.updateOperationalState(OP_PAUSED);
         return;
       }
     } catch (error: unknown) {
@@ -592,19 +614,22 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
 
   static safeCleanSpeed(robovac: RobovacClient): number {
     try {
-      const speedMap: { [key: string]: number } = {
+      const speedMap: Record<string, number> = {
         'Quiet': CLEAN_SPEED_QUIET,
         'Standard': CLEAN_SPEED_STANDARD,
         'Turbo': CLEAN_SPEED_TURBO,
         'Max': CLEAN_SPEED_MAX,
+        '0': CLEAN_SPEED_QUIET,
+        '1': CLEAN_SPEED_STANDARD,
+        '2': CLEAN_SPEED_TURBO,
+        '3': CLEAN_SPEED_MAX,
       };
-      // dps['102'] contains the clean speed value string
-      const cleanSpeedValue = robovac.dps?.['102'];
-      if (typeof cleanSpeedValue !== 'string') {
-        return CLEAN_SPEED_STANDARD;
+      const cleanSpeedValue = robovac.dps?.cleanSpeed ?? robovac.dps?.['102'] ?? robovac.dps?.['158'];
+      if (cleanSpeedValue !== undefined && cleanSpeedValue !== null) {
+        const mappedSpeed = speedMap[String(cleanSpeedValue)];
+        return mappedSpeed !== undefined ? mappedSpeed : CLEAN_SPEED_STANDARD;
       }
-      const mappedSpeed = speedMap[cleanSpeedValue];
-      return mappedSpeed !== undefined ? mappedSpeed : CLEAN_SPEED_STANDARD;
+      return CLEAN_SPEED_STANDARD;
     } catch {
       return CLEAN_SPEED_STANDARD;
     }

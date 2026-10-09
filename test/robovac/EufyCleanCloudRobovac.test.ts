@@ -80,6 +80,61 @@ describe('EufyCleanCloudRobovac Tuya cloud state', () => {
     ]));
   });
 
+  it('correctly handles arrival at dock when stale goHome command exists in DPS 152', () => {
+    const robovac = new EufyCleanCloudRobovac({});
+    const testable = robovac as unknown as TestableCloudRobovac;
+
+    // Simulate vacuum having arrived at dock: DPS 152 is still method 6 (goHome),
+    // but DPS 155 is now "Brake" (physical idle at dock)
+    testable.applyTuyaCloudState({
+      dps: {
+        '152': 'AggG', // method 6 = goHome (stale command)
+        '155': 'Brake', // physical state at dock
+        '163': 100,
+      },
+    });
+
+    expect(robovac.activity()).toBe('Sleeping');
+    expect(robovac.docked()).toBe(true);
+    expect(robovac.goingHome()).toBe(false);
+  });
+
+  it('handles physical Charging state in DPS 155', () => {
+    const robovac = new EufyCleanCloudRobovac({});
+    const testable = robovac as unknown as TestableCloudRobovac;
+
+    testable.applyTuyaCloudState({
+      dps: {
+        '152': 'AggG', // method 6 = goHome
+        '155': 'Charging',
+        '163': 85,
+      },
+    });
+
+    expect(robovac.activity()).toBe('Charging');
+    expect(robovac.docked()).toBe(true);
+    expect(robovac.goingHome()).toBe(false);
+  });
+
+  it('handles active Cleaning state in DPS 155 and DPS 152', () => {
+    const robovac = new EufyCleanCloudRobovac({});
+    const testable = robovac as unknown as TestableCloudRobovac;
+
+    testable.applyTuyaCloudState({
+      dps: {
+        '152': 'AggA', // method 0 = auto clean
+        '155': 'Cleaning',
+        '158': 2, // numeric Turbo
+        '163': 70,
+      },
+    });
+
+    expect(robovac.activity()).toBe('Cleaning');
+    expect(robovac.docked()).toBe(false);
+    expect(robovac.goingHome()).toBe(false);
+    expect(robovac.dps.cleanSpeed).toBe('Turbo');
+  });
+
   it('coalesces overlapping Tuya cloud refreshes', async () => {
     const robovac = new EufyCleanCloudRobovac({});
     const testable = robovac as unknown as TestableCloudRobovac;

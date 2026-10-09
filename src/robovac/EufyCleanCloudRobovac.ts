@@ -85,6 +85,39 @@ const CLEAN_SPEED_VALUES: Record<string, number> = {
   Max: 3,
 };
 
+const CLEAN_SPEED_NAMES: Record<string, string> = {
+  '0': 'Quiet',
+  '1': 'Standard',
+  '2': 'Turbo',
+  '3': 'Max',
+  'quiet': 'Quiet',
+  'standard': 'Standard',
+  'turbo': 'Turbo',
+  'max': 'Max',
+  'Quiet': 'Quiet',
+  'Standard': 'Standard',
+  'Turbo': 'Turbo',
+  'Max': 'Max',
+};
+
+const NOVEL_WORK_STATUS_153: Record<string, string> = {
+  'BgoAEAUyAA==': 'Cleaning',
+  'BgoAEAVSAA==': 'Cleaning',
+  'CAoAEAUyAggB': 'Paused',
+  'CAoCCAEQBTIA': 'Cleaning',
+  'CAoCCAEQBVIA': 'Cleaning',
+  'CgoCCAEQBTICCAE=': 'Paused',
+  'CAoCCAIQBTIA': 'Cleaning',
+  'CAoCCAIQBVIA': 'Cleaning',
+  'CgoCCAIQBTICCAE=': 'Paused',
+  'BAoAEAY=': 'Cleaning',
+  'BBAHQgA=': 'Recharge',
+  'BBADGgA=': 'Charging',
+  'BhADGgIIAQ==': 'completed',
+  'AA==': 'Sleeping',
+  'AhAB': 'Sleeping',
+};
+
 const NOVEL_MODEL_PREFIXES = new Set(['T2080', 'T2351', 'T2352', 'T2353']);
 
 export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient {
@@ -260,10 +293,16 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
 
   docked(): boolean {
     const activity = this.activity();
-    return activity === 'Sleeping' || activity === 'completed' || activity === 'Charging' || this.booleanState('docked', false);
+    if (activity === 'Cleaning' || activity === 'Running' || activity === 'Recharge') {
+      return false;
+    }
+    return this.booleanState('docked', false) || activity === 'Sleeping' || activity === 'completed' || activity === 'Charging';
   }
 
   goingHome(): boolean {
+    if (this.docked()) {
+      return false;
+    }
     return this.booleanState('goHome', false) || this.activity() === 'Recharge';
   }
 
@@ -763,7 +802,10 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       this.emit('debug', 'Eufy/Tuya cloud refresh returned no DPS state.');
       return;
     }
+    this.applyRawDps(rawDps);
+  }
 
+  private applyRawDps(rawDps: Record<string, unknown>): void {
     const hasNovel = Object.values(NOVEL_DPS).some(key => Object.hasOwn(rawDps, key));
     const hasLegacy = Object.values(LEGACY_DPS).some(key => Object.hasOwn(rawDps, key));
     if (hasNovel && !hasLegacy) {
@@ -779,7 +821,8 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
         normalized.battery = Number(rawDps[NOVEL_DPS.BATTERY_LEVEL]);
       }
       if (Object.hasOwn(rawDps, NOVEL_DPS.CLEAN_SPEED)) {
-        normalized.cleanSpeed = rawDps[NOVEL_DPS.CLEAN_SPEED];
+        const speedVal = rawDps[NOVEL_DPS.CLEAN_SPEED];
+        normalized.cleanSpeed = CLEAN_SPEED_NAMES[String(speedVal)] ?? speedVal;
       }
       if (Object.hasOwn(rawDps, NOVEL_DPS.FIND_ROBOT)) {
         normalized.locate = Boolean(rawDps[NOVEL_DPS.FIND_ROBOT]);
@@ -787,39 +830,92 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       if (Object.hasOwn(rawDps, NOVEL_DPS.ERROR_CODE)) {
         normalized.error = rawDps[NOVEL_DPS.ERROR_CODE];
       }
-      if (Object.hasOwn(rawDps, '155')) {
-        const val = String(rawDps['155']);
-        if (val.toLowerCase() === 'brake' || val.toLowerCase() === 'standby' || val.toLowerCase() === 'sleep') {
-          normalized.activity = 'Sleeping';
-          normalized.docked = true;
-          normalized.goHome = false;
-        } else if (val.toLowerCase().includes('recharge') || val.toLowerCase().includes('home') || val.toLowerCase().includes('dock')) {
-          normalized.activity = 'Recharge';
-          normalized.docked = false;
-          normalized.goHome = true;
-        } else if (val.toLowerCase().includes('clean')) {
-          normalized.activity = 'Cleaning';
-          normalized.docked = false;
-          normalized.goHome = false;
-        }
-      }
+      // Process DPS 152 (PLAY_PAUSE / MODE_CTRL) first — this reflects the last-issued command
+      // (e.g., goHome), which may be stale once the vacuum has reached the dock.
       if (Object.hasOwn(rawDps, NOVEL_DPS.PLAY_PAUSE)) {
         const method = this.decodeModeCtrlMethod(String(rawDps[NOVEL_DPS.PLAY_PAUSE]));
         if (method !== undefined) {
-          if (method === 0 || method === 1 || method === 14) {
+          if (method === 0 || method === 1 || method === 2 || method === 14) {
             normalized.activity = 'Cleaning';
             normalized.playPause = true;
             normalized.docked = false;
+            normalized.goHome = false;
           } else if (method === 6) {
             normalized.activity = 'Recharge';
             normalized.goHome = true;
             normalized.docked = false;
+            normalized.playPause = false;
           } else if (method === 13) {
             if (!normalized.activity) {
               normalized.activity = 'Sleeping';
             }
             normalized.playPause = false;
           }
+        }
+      }
+      // Process DPS 153 (WORK_STATUS - Protobuf) next
+      if (Object.hasOwn(rawDps, NOVEL_DPS.WORK_STATUS)) {
+        const raw153 = String(rawDps[NOVEL_DPS.WORK_STATUS]);
+        const decodedStatus = NOVEL_WORK_STATUS_153[raw153];
+        if (decodedStatus) {
+          if (decodedStatus === 'Cleaning') {
+            normalized.activity = 'Cleaning';
+            normalized.docked = false;
+            normalized.goHome = false;
+            normalized.playPause = true;
+          } else if (decodedStatus === 'Paused') {
+            normalized.activity = 'Sleeping';
+            normalized.playPause = false;
+          } else if (decodedStatus === 'Recharge') {
+            normalized.activity = 'Recharge';
+            normalized.docked = false;
+            normalized.goHome = true;
+            normalized.playPause = false;
+          } else if (decodedStatus === 'Charging') {
+            normalized.activity = 'Charging';
+            normalized.docked = true;
+            normalized.goHome = false;
+            normalized.playPause = false;
+          } else if (decodedStatus === 'completed' || decodedStatus === 'Sleeping') {
+            normalized.activity = decodedStatus;
+            normalized.docked = true;
+            normalized.goHome = false;
+            normalized.playPause = false;
+          }
+        }
+      }
+      // Process DPS 155 second — this reflects the actual current physical state
+      // (e.g., "Brake" = docked/idle, "Charging" = on dock) and takes priority over commands in DPS 152.
+      if (Object.hasOwn(rawDps, '155')) {
+        const val = String(rawDps['155']).toLowerCase();
+        if (val === 'brake' || val === 'standby' || val === 'sleep' || val === 'sleeping' || val === 'docked' || val === 'dock') {
+          normalized.activity = 'Sleeping';
+          normalized.docked = true;
+          normalized.goHome = false;
+          normalized.playPause = false;
+        } else if (val === 'charging' || val === 'charge') {
+          normalized.activity = 'Charging';
+          normalized.docked = true;
+          normalized.goHome = false;
+          normalized.playPause = false;
+        } else if (val === 'completed') {
+          normalized.activity = 'completed';
+          normalized.docked = true;
+          normalized.goHome = false;
+          normalized.playPause = false;
+        } else if (val.includes('recharge') || val.includes('goto_charge') || val.includes('returning') || val.includes('going_to_charge')) {
+          normalized.activity = 'Recharge';
+          normalized.docked = false;
+          normalized.goHome = true;
+          normalized.playPause = false;
+        } else if (val.includes('clean') || val.includes('running')) {
+          normalized.activity = 'Cleaning';
+          normalized.docked = false;
+          normalized.goHome = false;
+          normalized.playPause = true;
+        } else if (val.includes('pause')) {
+          normalized.activity = 'Sleeping';
+          normalized.playPause = false;
         }
       }
     } else {
@@ -841,7 +937,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       }
     }
 
-    this.emit('debug', `Refreshed Eufy/Tuya cloud state with DPS keys: ${Object.keys(rawDps).sort().join(', ')}`);
+    this.emit('debug', `Normalized DPS state with keys: ${Object.keys(rawDps).sort().join(', ')}`);
     this.setState({ ...rawDps, ...normalized });
   }
 
@@ -1256,7 +1352,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     this.mqttPendingStatusSince = undefined;
     const status = this.codec.decodeStatus(this.unwrapPayload(payload));
     this.emit('debug', `Received Eufy Clean MQTT status from ${topic} with keys: ${Object.keys(status.dps).join(', ') || 'none'}`);
-    this.setState(status.dps);
+    this.applyRawDps(status.dps);
   }
 
   private setState(next: Record<string, unknown>): void {
