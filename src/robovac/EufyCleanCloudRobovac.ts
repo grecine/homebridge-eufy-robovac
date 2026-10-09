@@ -883,11 +883,13 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       // (e.g., "Brake" = docked/idle, "Charging" = on dock) and takes priority over commands in DPS 152.
       if (Object.hasOwn(rawDps, '155')) {
         const val = String(rawDps['155']).toLowerCase();
-        if (val === 'brake' || val === 'standby' || val === 'sleep' || val === 'sleeping' || val === 'docked' || val === 'dock') {
-          normalized.activity = 'Sleeping';
-          normalized.docked = true;
-          normalized.goHome = false;
-        } else if (val === 'charging' || val === 'charge') {
+        
+        // Helper to decide if we should override the activity set by 152/153
+        // We shouldn't let 'brake'/'standby' override an active 'Cleaning' state
+        // because some models report 'brake' continuously on DPS 155 even while vacuuming.
+        const canOverrideIdle = !normalized.activity || normalized.activity === 'Sleeping' || normalized.activity === 'Paused' || normalized.activity === 'completed';
+
+        if (val === 'charging' || val === 'charge') {
           normalized.activity = 'Charging';
           normalized.docked = true;
           normalized.goHome = false;
@@ -905,8 +907,21 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
           normalized.goHome = false;
           normalized.playPause = true;
         } else if (val.includes('pause')) {
-          normalized.activity = 'Paused';
-          normalized.playPause = false;
+          if (canOverrideIdle || normalized.activity === 'Cleaning') {
+            normalized.activity = 'Paused';
+            normalized.playPause = false;
+          }
+        } else if (val === 'brake' || val === 'standby' || val === 'sleep' || val === 'sleeping' || val === 'docked' || val === 'dock') {
+          if (canOverrideIdle) {
+            if (val === 'docked' || val === 'dock') {
+              normalized.activity = 'Sleeping';
+              normalized.docked = true;
+            } else {
+              // brake, standby, sleep: only mark as Sleeping/docked if it was already docked
+              normalized.activity = this.booleanState('docked', false) ? 'Sleeping' : 'Paused';
+            }
+            normalized.goHome = false;
+          }
         }
       }
     } else {

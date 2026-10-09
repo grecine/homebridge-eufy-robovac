@@ -69,11 +69,11 @@ describe('EufyCleanCloudRobovac Tuya cloud state', () => {
       },
     });
 
-    expect(robovac.activity()).toBe('Sleeping');
+    expect(robovac.activity()).toBe('Paused');
     expect(robovac.batteryLevel()).toBe(98);
-    expect(robovac.docked()).toBe(true);
+    expect(robovac.docked()).toBe(false);
     expect(events).toEqual(expect.arrayContaining([
-      { command: 'activity', value: 'Sleeping' },
+      { command: 'activity', value: 'Paused' },
       { command: 'battery', value: 98 },
       { command: 'cleanSpeed', value: 'Turbo' },
       { command: 'locate', value: false },
@@ -85,16 +85,16 @@ describe('EufyCleanCloudRobovac Tuya cloud state', () => {
     const testable = robovac as unknown as TestableCloudRobovac;
 
     // Simulate vacuum having arrived at dock: DPS 152 is still method 6 (goHome),
-    // but DPS 155 is now "Brake" (physical idle at dock)
+    // but DPS 155 is now "Charging" (physical state at dock)
     testable.applyTuyaCloudState({
       dps: {
         '152': 'AggG', // method 6 = goHome (stale command)
-        '155': 'Brake', // physical state at dock
+        '155': 'Charging', // physical state at dock
         '163': 100,
       },
     });
 
-    expect(robovac.activity()).toBe('Sleeping');
+    expect(robovac.activity()).toBe('Charging');
     expect(robovac.docked()).toBe(true);
     expect(robovac.goingHome()).toBe(false);
   });
