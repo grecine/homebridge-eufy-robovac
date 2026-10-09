@@ -50,6 +50,36 @@ describe('EufyCleanCloudRobovac Tuya cloud state', () => {
     ]));
   });
 
+  it('normalizes novel Tuya DPS (L60 SES) into live RoboVac state and events', () => {
+    const robovac = new EufyCleanCloudRobovac({});
+    const testable = robovac as unknown as TestableCloudRobovac;
+    const events: Array<{ command: string; value: unknown }> = [];
+    robovac.on('event', event => events.push(event));
+
+    testable.applyTuyaCloudState({
+      dps: {
+        '151': true,
+        '152': 'AggN', // method 13 = pause/idle
+        '153': 'CgoCCAEQBTICCAE=',
+        '155': 'Brake',
+        '158': 'Turbo',
+        '160': false,
+        '163': 98,
+        '173': 'FAoQMggKAggBEgIQAjoECgIIARIA',
+      },
+    });
+
+    expect(robovac.activity()).toBe('Sleeping');
+    expect(robovac.batteryLevel()).toBe(98);
+    expect(robovac.docked()).toBe(true);
+    expect(events).toEqual(expect.arrayContaining([
+      { command: 'activity', value: 'Sleeping' },
+      { command: 'battery', value: 98 },
+      { command: 'cleanSpeed', value: 'Turbo' },
+      { command: 'locate', value: false },
+    ]));
+  });
+
   it('coalesces overlapping Tuya cloud refreshes', async () => {
     const robovac = new EufyCleanCloudRobovac({});
     const testable = robovac as unknown as TestableCloudRobovac;

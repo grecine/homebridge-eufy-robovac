@@ -125,7 +125,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
   constructor(private readonly config: EufyCleanConfig) {
     super();
     this.accessToken = config.accessToken;
-    this.openudid = config.openudid ?? randomBytes(16).toString('hex');
+    this.openudid = config.openudid ?? (config.email ? createHash('md5').update(config.email + '-robovac').digest('hex') : randomBytes(16).toString('hex'));
   }
 
   async initialize(): Promise<void> {
@@ -293,6 +293,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
     ];
 
     let firstToken: string | undefined;
+    let lastError: string | undefined;
     for (const loginConfig of configs) {
       const response = await fetch(loginConfig.url, {
         method: 'POST',
@@ -306,6 +307,10 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       });
 
       if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        const retryAfter = response.headers.get('retry-after') || response.headers.get('x-retry-in');
+        lastError = `HTTP ${response.status} ${response.statusText}${retryAfter ? ` (retry in ${retryAfter})` : ''}: ${text}`;
+        this.discoveryNotes.push(`login:${loginConfig.category}:failed ${lastError}`);
         continue;
       }
 
@@ -318,7 +323,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
           this.eufyUserIds.push(userId);
         }
         this.discoveryNotes.push(`login:${loginConfig.category}:ok user-id=${userId ? 'yes' : 'no'} keys=${this.safeKeys(data).join(',')}`);
-        continue;
+        break;
       }
       this.discoveryNotes.push(`login:${loginConfig.category}:missing-token keys=${this.safeKeys(data).join(',')}`);
     }
@@ -329,7 +334,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       return firstToken;
     }
 
-    throw new Error('Eufy Clean login failed.');
+    throw new Error(`Eufy Clean login failed${lastError ? `: ${lastError}` : '.'}`);
   }
 
   private async loadUserInfo(): Promise<void> {
@@ -463,6 +468,9 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       const hasLegacyDps = Object.values(LEGACY_DPS).some(key => keys.has(key));
       if (hasLegacyDps && !hasNovelDps) {
         return 'legacy';
+      }
+      if (hasNovelDps) {
+        return 'novel';
       }
     }
 
@@ -756,26 +764,97 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
       return;
     }
 
-    const mappings: Record<string, string> = {
-      [LEGACY_DPS.PLAY_PAUSE]: 'playPause',
-      [LEGACY_DPS.WORK_MODE]: 'workMode',
-      '15': 'activity',
-      [LEGACY_DPS.GO_HOME]: 'goHome',
-      [LEGACY_DPS.CLEAN_SPEED]: 'cleanSpeed',
-      [LEGACY_DPS.FIND_ROBOT]: 'locate',
-      [LEGACY_DPS.BATTERY_LEVEL]: 'battery',
-      [LEGACY_DPS.ERROR_CODE]: 'error',
-      '109': 'runtime',
-    };
+    const hasNovel = Object.values(NOVEL_DPS).some(key => Object.hasOwn(rawDps, key));
+    const hasLegacy = Object.values(LEGACY_DPS).some(key => Object.hasOwn(rawDps, key));
+    if (hasNovel && !hasLegacy) {
+      this.cloudApiMode = 'novel';
+    } else if (hasLegacy && !hasNovel) {
+      this.cloudApiMode = 'legacy';
+    }
+
     const normalized: Record<string, unknown> = {};
-    for (const [dpsKey, stateKey] of Object.entries(mappings)) {
-      if (Object.hasOwn(rawDps, dpsKey)) {
-        normalized[stateKey] = rawDps[dpsKey];
+
+    if (this.cloudApiMode === 'novel') {
+      if (Object.hasOwn(rawDps, NOVEL_DPS.BATTERY_LEVEL)) {
+        normalized.battery = Number(rawDps[NOVEL_DPS.BATTERY_LEVEL]);
+      }
+      if (Object.hasOwn(rawDps, NOVEL_DPS.CLEAN_SPEED)) {
+        normalized.cleanSpeed = rawDps[NOVEL_DPS.CLEAN_SPEED];
+      }
+      if (Object.hasOwn(rawDps, NOVEL_DPS.FIND_ROBOT)) {
+        normalized.locate = Boolean(rawDps[NOVEL_DPS.FIND_ROBOT]);
+      }
+      if (Object.hasOwn(rawDps, NOVEL_DPS.ERROR_CODE)) {
+        normalized.error = rawDps[NOVEL_DPS.ERROR_CODE];
+      }
+      if (Object.hasOwn(rawDps, '155')) {
+        const val = String(rawDps['155']);
+        if (val.toLowerCase() === 'brake' || val.toLowerCase() === 'standby' || val.toLowerCase() === 'sleep') {
+          normalized.activity = 'Sleeping';
+          normalized.docked = true;
+          normalized.goHome = false;
+        } else if (val.toLowerCase().includes('recharge') || val.toLowerCase().includes('home') || val.toLowerCase().includes('dock')) {
+          normalized.activity = 'Recharge';
+          normalized.docked = false;
+          normalized.goHome = true;
+        } else if (val.toLowerCase().includes('clean')) {
+          normalized.activity = 'Cleaning';
+          normalized.docked = false;
+          normalized.goHome = false;
+        }
+      }
+      if (Object.hasOwn(rawDps, NOVEL_DPS.PLAY_PAUSE)) {
+        const method = this.decodeModeCtrlMethod(String(rawDps[NOVEL_DPS.PLAY_PAUSE]));
+        if (method !== undefined) {
+          if (method === 0 || method === 1 || method === 14) {
+            normalized.activity = 'Cleaning';
+            normalized.playPause = true;
+            normalized.docked = false;
+          } else if (method === 6) {
+            normalized.activity = 'Recharge';
+            normalized.goHome = true;
+            normalized.docked = false;
+          } else if (method === 13) {
+            if (!normalized.activity) {
+              normalized.activity = 'Sleeping';
+            }
+            normalized.playPause = false;
+          }
+        }
+      }
+    } else {
+      const mappings: Record<string, string> = {
+        [LEGACY_DPS.PLAY_PAUSE]: 'playPause',
+        [LEGACY_DPS.WORK_MODE]: 'workMode',
+        '15': 'activity',
+        [LEGACY_DPS.GO_HOME]: 'goHome',
+        [LEGACY_DPS.CLEAN_SPEED]: 'cleanSpeed',
+        [LEGACY_DPS.FIND_ROBOT]: 'locate',
+        [LEGACY_DPS.BATTERY_LEVEL]: 'battery',
+        [LEGACY_DPS.ERROR_CODE]: 'error',
+        '109': 'runtime',
+      };
+      for (const [dpsKey, stateKey] of Object.entries(mappings)) {
+        if (Object.hasOwn(rawDps, dpsKey)) {
+          normalized[stateKey] = rawDps[dpsKey];
+        }
       }
     }
 
     this.emit('debug', `Refreshed Eufy/Tuya cloud state with DPS keys: ${Object.keys(rawDps).sort().join(', ')}`);
     this.setState({ ...rawDps, ...normalized });
+  }
+
+  private decodeModeCtrlMethod(base64Payload: string): number | undefined {
+    try {
+      const buffer = Buffer.from(base64Payload, 'base64');
+      if (buffer.length >= 3 && buffer[1] === 0x08) {
+        return buffer[2];
+      }
+    } catch {
+      // ignore
+    }
+    return undefined;
   }
 
   private scheduleTuyaPoll(delay = this.tuyaPollInterval()): void {
@@ -1125,7 +1204,7 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
 
   private async sendCommand(command: CloudCommand, payload: Record<string, unknown> = {}): Promise<void> {
     if (this.commandTransport === 'tuya-cloud') {
-      const dataPayloads = this.legacyCommandPayload(command, payload);
+      const dataPayloads = this.commandPayloads(command, payload);
       for (const dataPayload of dataPayloads) {
         this.emit(
           'debug',
