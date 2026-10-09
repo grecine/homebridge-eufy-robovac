@@ -844,12 +844,10 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
             normalized.activity = 'Recharge';
             normalized.goHome = true;
             normalized.docked = false;
-            normalized.playPause = false;
           } else if (method === 13) {
             if (!normalized.activity) {
               normalized.activity = 'Sleeping';
             }
-            normalized.playPause = false;
           }
         }
       }
@@ -864,23 +862,20 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
             normalized.goHome = false;
             normalized.playPause = true;
           } else if (decodedStatus === 'Paused') {
-            normalized.activity = 'Sleeping';
+            normalized.activity = 'Paused';
             normalized.playPause = false;
           } else if (decodedStatus === 'Recharge') {
             normalized.activity = 'Recharge';
             normalized.docked = false;
             normalized.goHome = true;
-            normalized.playPause = false;
           } else if (decodedStatus === 'Charging') {
             normalized.activity = 'Charging';
             normalized.docked = true;
             normalized.goHome = false;
-            normalized.playPause = false;
           } else if (decodedStatus === 'completed' || decodedStatus === 'Sleeping') {
             normalized.activity = decodedStatus;
             normalized.docked = true;
             normalized.goHome = false;
-            normalized.playPause = false;
           }
         }
       }
@@ -892,29 +887,25 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
           normalized.activity = 'Sleeping';
           normalized.docked = true;
           normalized.goHome = false;
-          normalized.playPause = false;
         } else if (val === 'charging' || val === 'charge') {
           normalized.activity = 'Charging';
           normalized.docked = true;
           normalized.goHome = false;
-          normalized.playPause = false;
         } else if (val === 'completed') {
           normalized.activity = 'completed';
           normalized.docked = true;
           normalized.goHome = false;
-          normalized.playPause = false;
         } else if (val.includes('recharge') || val.includes('goto_charge') || val.includes('returning') || val.includes('going_to_charge')) {
           normalized.activity = 'Recharge';
           normalized.docked = false;
           normalized.goHome = true;
-          normalized.playPause = false;
         } else if (val.includes('clean') || val.includes('running')) {
           normalized.activity = 'Cleaning';
           normalized.docked = false;
           normalized.goHome = false;
           normalized.playPause = true;
         } else if (val.includes('pause')) {
-          normalized.activity = 'Sleeping';
+          normalized.activity = 'Paused';
           normalized.playPause = false;
         }
       }

@@ -676,6 +676,7 @@ describe('EufyRobovacMatterAccessory', () => {
     });
 
     it('should set operationalState=2 (Paused) on event { command: playPause, value: false }', () => {
+      robovac = createMockRoboVac({ batteryLevel: 80, docked: false, activity: 'Running' });
       config = createMockConfig();
       const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
       accessory.setMatterReady();
@@ -685,6 +686,17 @@ describe('EufyRobovacMatterAccessory', () => {
       expect(api.matter.updateAccessoryState).toHaveBeenCalledWith(
         accessory.UUID, 'rvcOperationalState', { operationalState: 2 }, undefined,
       );
+    });
+
+    it('should not override Docked/Charging state on event { command: playPause, value: false } when docked', () => {
+      robovac = createMockRoboVac({ batteryLevel: 80, docked: true, activity: 'Sleeping' });
+      config = createMockConfig();
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.emit('event', { command: 'playPause', value: false });
+
+      expect(accessory.getOperationalState()).toBe(65);
     });
 
     it('should set operationalState=1 (Running) on event { command: playPause, value: true }', () => {

@@ -388,7 +388,17 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
         }
       } else if (event.command === 'playPause') {
         if (event.value === false) {
-          this.updateOperationalState(OP_PAUSED).catch(e => this.logError('Failed to update state:', e));
+          const docked = EufyRobovacMatterAccessory.safeDockedState(this.robovac);
+          const activity = this.robovac.activity();
+          if (docked || activity === 'Sleeping' || activity === 'completed' || activity === 'Charging') {
+            this.logDebug('playPause false received while docked/idle — syncing operational state');
+            this.syncOperationalState();
+          } else if (this.robovac.goingHome() || activity === 'Recharge') {
+            this.logDebug('playPause false received while returning to dock');
+            this.updateOperationalState(OP_SEEKING_CHARGER).catch(e => this.logError('Failed to update state:', e));
+          } else {
+            this.updateOperationalState(OP_PAUSED).catch(e => this.logError('Failed to update state:', e));
+          }
         } else {
           this.updateOperationalState(OP_RUNNING).catch(e => this.logError('Failed to update state:', e));
           this.updateRunMode(RUN_CLEANING).catch(e => this.logError('Failed to update state:', e));
@@ -519,7 +529,11 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
     this.logDebug(`updating operational state: ${state}`);
     this.currentOperationalState = state;
     await this.updateState('rvcOperationalState', { operationalState: state });
-    const batChargeState = state === OP_CHARGING ? 1 : 3;
+    const isCharging = state === OP_CHARGING || (
+      EufyRobovacMatterAccessory.safeDockedState(this.robovac)
+      && EufyRobovacMatterAccessory.safeBatteryLevel(this.robovac) < 100
+    );
+    const batChargeState = isCharging ? 1 : 3;
     await this.updateState('powerSource', { batChargeState });
   }
 
