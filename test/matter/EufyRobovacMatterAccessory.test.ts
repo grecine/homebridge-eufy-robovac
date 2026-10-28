@@ -70,6 +70,12 @@ describe('EufyRobovacMatterAccessory', () => {
       const stateIds = accessory.clusters?.rvcOperationalState?.operationalStateList
         .map((s: { operationalStateId: number }) => s.operationalStateId);
       expect(stateIds).toEqual([0, 1, 2, 3, 64, 65, 66]);
+      expect(accessory.clusters?.rvcOperationalState?.operationalError).toEqual({
+        errorStateId: 0,
+        errorStateDetails: 'No error',
+      });
+      expect(accessory.clusters?.rvcOperationalState?.phaseList).toBeNull();
+      expect(accessory.clusters?.rvcOperationalState?.currentPhase).toBeNull();
     });
 
     it('should have serviceArea cluster when roomSwitches provided in config', () => {
@@ -822,6 +828,22 @@ describe('EufyRobovacMatterAccessory', () => {
       const cleanModeUpdates = (api.matter.updateAccessoryState as ReturnType<typeof vi.fn>)
         .mock.calls.filter((c: unknown[]) => c[1] === 'rvcCleanMode');
       expect(cleanModeUpdates).toHaveLength(0);
+    });
+
+    it('should ignore alert events with undefined duration', () => {
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.emit('alert', { consumable: 'battery', duration: undefined });
+      expect(log.warn).not.toHaveBeenCalledWith(expect.stringContaining('[MAINTENANCE WARNING]'));
+    });
+
+    it('should log warning for alert events with defined duration', () => {
+      const accessory = new EufyRobovacMatterAccessory(api, log, config, robovac);
+      accessory.setMatterReady();
+
+      robovac.emit('alert', { consumable: 'side_brush', duration: 260 });
+      expect(log.warn).toHaveBeenCalledWith('[Test RoboVac] [MAINTENANCE WARNING] side_brush: 260');
     });
   });
 });

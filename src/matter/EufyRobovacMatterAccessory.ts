@@ -112,6 +112,8 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
         },
 
         rvcOperationalState: {
+          phaseList: null,
+          currentPhase: null,
           operationalStateList: [
             { operationalStateId: OP_STOPPED },
             { operationalStateId: OP_RUNNING },
@@ -122,6 +124,10 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
             { operationalStateId: OP_DOCKED },
           ],
           operationalState: OP_DOCKED,
+          operationalError: {
+            errorStateId: 0,
+            errorStateDetails: 'No error',
+          },
         },
 
         ...(hasServiceArea ? {
@@ -240,14 +246,17 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
         this.logDebug('starting full clean');
         await this.robovac.clean();
       }
+      await this.updateRunMode(RUN_CLEANING);
       await this.updateOperationalState(OP_RUNNING);
     } else if (newMode === RUN_IDLE) {
       this.logDebug('pausing and returning to dock');
       await this.robovac.pause();
       if (this.supportsHome()) {
         await this.robovac.goHome(true);
+        await this.updateRunMode(RUN_IDLE);
         await this.updateOperationalState(OP_SEEKING_CHARGER);
       } else {
+        await this.updateRunMode(RUN_IDLE);
         await this.updateOperationalState(OP_STOPPED);
       }
     }
@@ -438,6 +447,9 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
     });
 
     this.robovac.on('alert', (alert: ConsumableAlert) => {
+      if (alert.duration === undefined || alert.duration === null) {
+        return;
+      }
       this.logInfo(`consumable maintenance alert: ${JSON.stringify(alert)}`);
       if (alert.consumable) {
         this.logWarn(`[MAINTENANCE WARNING] ${alert.consumable}: ${alert.duration}`);
@@ -464,11 +476,13 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
       if (error && mapEufyErrorToMatterErrorState(error) !== MatterErrorState.NoError) {
         this.logWarn(`device error: ${error}`);
         this.updateErrorState(error).catch(e => this.logError('Failed to update error state:', e));
-        this.updateOperationalState(OP_ERROR);
+        this.updateOperationalState(OP_ERROR).catch(e => this.logError('Failed to update operational state:', e));
         return;
       }
 
-      this.clearErrorState().catch(e => this.logError('Failed to clear error state:', e));
+      if (this.currentErrorState !== 0) {
+        this.clearErrorState().catch(e => this.logError('Failed to clear error state:', e));
+      }
 
       const activity = this.robovac.activity();
       this.logDebug(`syncing operational state — activity: ${activity}`);
@@ -477,30 +491,30 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
         const docked = EufyRobovacMatterAccessory.safeDockedState(this.robovac);
         const level = EufyRobovacMatterAccessory.safeBatteryLevel(this.robovac);
         const state = docked && level < 100 ? OP_CHARGING : OP_DOCKED;
-        this.updateOperationalState(state);
-        this.updateRunMode(RUN_IDLE);
+        this.updateOperationalState(state).catch(e => this.logError('Failed to update state:', e));
+        this.updateRunMode(RUN_IDLE).catch(e => this.logError('Failed to update state:', e));
         return;
       }
       if (activity === 'Charging') {
-        this.updateOperationalState(OP_CHARGING);
-        this.updateRunMode(RUN_IDLE);
+        this.updateOperationalState(OP_CHARGING).catch(e => this.logError('Failed to update state:', e));
+        this.updateRunMode(RUN_IDLE).catch(e => this.logError('Failed to update state:', e));
         return;
       }
 
       if (activity === 'Recharge' || this.robovac.goingHome()) {
-        this.updateOperationalState(OP_SEEKING_CHARGER);
-        this.updateRunMode(RUN_IDLE);
+        this.updateOperationalState(OP_SEEKING_CHARGER).catch(e => this.logError('Failed to update state:', e));
+        this.updateRunMode(RUN_IDLE).catch(e => this.logError('Failed to update state:', e));
         return;
       }
 
       if (activity === 'Cleaning' || activity === 'Running' || activity === 'cleaning') {
-        this.updateOperationalState(OP_RUNNING);
-        this.updateRunMode(RUN_CLEANING);
+        this.updateOperationalState(OP_RUNNING).catch(e => this.logError('Failed to update state:', e));
+        this.updateRunMode(RUN_CLEANING).catch(e => this.logError('Failed to update state:', e));
         return;
       }
 
       if (activity === 'Paused' || activity === 'paused') {
-        this.updateOperationalState(OP_PAUSED);
+        this.updateOperationalState(OP_PAUSED).catch(e => this.logError('Failed to update state:', e));
         return;
       }
     } catch (error: unknown) {
@@ -571,6 +585,9 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
   }
 
   private async clearErrorState(): Promise<void> {
+    if (this.currentErrorState === 0) {
+      return;
+    }
     this.logDebug('clearing error state');
     this.currentErrorState = 0;
     const operationalError: Record<string, unknown> = {
