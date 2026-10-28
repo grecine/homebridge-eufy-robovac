@@ -887,7 +887,10 @@ export class EufyCleanCloudRobovac extends EventEmitter implements RobovacClient
         // Helper to decide if we should override the activity set by 152/153
         // We shouldn't let 'brake'/'standby' override an active 'Cleaning' state
         // because some models report 'brake' continuously on DPS 155 even while vacuuming.
-        const canOverrideIdle = !normalized.activity || normalized.activity === 'Sleeping' || normalized.activity === 'Paused' || normalized.activity === 'completed';
+        const canOverrideIdle = !normalized.activity
+          || normalized.activity === 'Sleeping'
+          || normalized.activity === 'Paused'
+          || normalized.activity === 'completed';
 
         if (val === 'charging' || val === 'charge') {
           normalized.activity = 'Charging';

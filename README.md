@@ -31,16 +31,16 @@ This plugin can be configured using homebridge-config-ui-x.
 
 The plugin supports two connection modes:
 
-* Legacy Tuya 3.3 local control - the original local LAN control path for older RoboVac models.
-* Eufy Clean cloud/MQTT - the newer Eufy Clean cloud control path for models that no longer expose the older local Tuya 3.3 API.
+* Legacy Tuya local control - the original local LAN control path for older RoboVac models.
+* Eufy Clean cloud/MQTT - the newer Eufy Clean cloud control path for models that no longer expose the older local Tuya API.
 
 Existing configurations continue to use Legacy Tuya mode by default.  To opt in to the newer cloud/MQTT API, set `transport` to `eufy-clean-cloud`.
 
 Homebridge Config UI will show the relevant fields for the selected connection type and validate the required settings for that mode.
 
-#### Legacy Tuya 3.3 Local Control
+#### Legacy Tuya Local Control
 
-Use this mode for older RoboVacs that still support local Tuya 3.3 control.
+Use this mode for RoboVacs that support local Tuya control.
 
 Required fields:
 
@@ -49,6 +49,10 @@ Required fields:
 * `ip` - the IP address of your RoboVac.  Configure your DHCP server to serve a static IP address to your RoboVac for the best experience.
 * `deviceId` - the Tuya/Eufy device ID
 * `deviceKey` - the Tuya/Eufy local key
+
+Optional fields:
+
+* `tuyaVersion` - Tuya protocol version, defaults to `3.3`. Options: `3.3`, `3.4`, `3.5`. Set to `3.5` for **eufy Clean X8 Pro Hybrid (T2266)** and **X8 Pro SES (T2276)**.
 
 The Tuya device ID and local key can be obtained by following https://github.com/gtalusan/eufy-device-id-js.
 
@@ -61,7 +65,8 @@ Example:
   "transport": "legacy-tuya",
   "ip": "10.0.1.69",
   "deviceId": "your-tuya-device-id",
-  "deviceKey": "your-tuya-local-key"
+  "deviceKey": "your-tuya-local-key",
+  "tuyaVersion": "3.3"
 }
 ```
 

@@ -196,6 +196,16 @@
           "functionBody": "return !model.transport || model.transport === 'legacy-tuya';"
         }
       },
+      "tuyaVersion": {
+        "title": "Tuya Protocol Version",
+        "description": "Tuya local protocol version. Use 3.3 for most RoboVacs (default). Use 3.5 for eufy Clean X8 Pro Hybrid (T2266) and X8 Pro SES (T2276).",
+        "type": "string",
+        "default": "3.3",
+        "enum": ["3.3", "3.4", "3.5"],
+        "condition": {
+          "functionBody": "return !model.transport || model.transport === 'legacy-tuya';"
+        }
+      },
       "roomSwitches": {
         "description": "Optional manual room switches. Use the room numbers shown by the Eufy Clean app map. If no rooms are configured, the RoboVac uses Auto mode.",
         "type": "array",

@@ -72,9 +72,13 @@ export function createRobovacClient(config: PlatformConfig, log: Logging): Robov
     return new EufyCleanCloudRobovac(toEufyCleanConfig(config));
   }
 
+  const tuyaVersion = (config.tuyaVersion as string | undefined) ?? '3.3';
+  log.info(`Connecting with Tuya protocol ${tuyaVersion}`);
+
   return createLegacyTuyaRobovac({
     ip: String(config.ip),
     deviceId: String(config.deviceId),
     deviceKey: String(config.deviceKey),
+    version: tuyaVersion,
   });
 }

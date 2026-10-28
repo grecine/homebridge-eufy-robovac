@@ -9,6 +9,7 @@ export interface LegacyTuyaRobovacConfig {
   ip: string;
   deviceId: string;
   deviceKey: string;
+  version?: string;
 }
 
 export function createLegacyTuyaRobovac(config: LegacyTuyaRobovacConfig): RobovacClient {
@@ -16,6 +17,7 @@ export function createLegacyTuyaRobovac(config: LegacyTuyaRobovacConfig): Robova
     ip: config.ip,
     deviceId: config.deviceId,
     localKey: config.deviceKey,
+    version: config.version,
   }) as RobovacClient;
   robovac.deviceId = config.deviceId;
   return robovac;

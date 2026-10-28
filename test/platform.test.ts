@@ -25,6 +25,7 @@ const mockState = vi.hoisted(() => {
   return {
     // The actual factory: called each time `new RoboVac(...)` is used in platform.ts
     shouldThrow: false,
+    lastRoboVacArgs: undefined as { version?: string } | undefined,
     makeRoboVac,
   };
 });
@@ -32,8 +33,8 @@ const mockState = vi.hoisted(() => {
 // Mock `module` so platform.ts's createRequire returns our mock RoboVac
 vi.mock('module', () => ({
   createRequire: () => (_id: string) => ({
-    RoboVac: function (...args: unknown[]) {
-      void args;
+    RoboVac: function (options: { version?: string }) {
+      mockState.lastRoboVacArgs = options;
       return mockState.makeRoboVac({ shouldThrow: mockState.shouldThrow });
     },
   }),
@@ -207,6 +208,16 @@ describe('EufyRobovacHomebridgePlatform', () => {
   // ─── Connection Management (3 tests) ──────────────────────────────
 
   describe('Connection Management', () => {
+    it('updates connection state when the legacy transport connects', async () => {
+      const platform = new EufyRobovacHomebridgePlatform(log, config, api);
+      await api._triggerDidFinishLaunching();
+
+      platform.robovac.emit('tuya.connected');
+
+      expect(platform.connected).toBe(true);
+      expect(log.info).toHaveBeenCalledWith('Connected');
+    });
+
     it('should log error and skip accessories on RoboVac initialization failure', async () => {
       mockState.shouldThrow = true;
       new EufyRobovacHomebridgePlatform(log, config, api);
@@ -241,6 +252,20 @@ describe('EufyRobovacHomebridgePlatform', () => {
       expect(platform.connected).toBe(false);
       expect(platform.robovac.connect).not.toHaveBeenCalled();
       expect(log.info).toHaveBeenCalledWith('Disconnected. Waiting for transport reconnect...');
+    });
+    it('should default to Tuya protocol 3.3 when tuyaVersion is omitted', async () => {
+      new EufyRobovacHomebridgePlatform(log, config, api);
+      await api._triggerDidFinishLaunching();
+      expect(mockState.lastRoboVacArgs).toMatchObject({ version: '3.3' });
+      expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Connecting with Tuya protocol 3.3'));
+    });
+
+    it('should pass configured tuyaVersion to RoboVac', async () => {
+      config = createMockConfig({ tuyaVersion: '3.5' });
+      new EufyRobovacHomebridgePlatform(log, config, api);
+      await api._triggerDidFinishLaunching();
+      expect(mockState.lastRoboVacArgs).toMatchObject({ version: '3.5' });
+      expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Connecting with Tuya protocol 3.5'));
     });
   });
 });
