@@ -26,7 +26,7 @@ LOCAL_VERSION=$(node -p "require('./package.json').version")
 echo -e "${YELLOW}🔍 Local version:     ${LOCAL_VERSION}${NC}"
 
 # Extract just the semver (e.g. "1.0.1") from npm list output, ignoring any trailing text
-INSTALLED_VERSION=$(ssh ${REMOTE_HOST} "docker exec ${CONTAINER_NAME} npm list ${PACKAGE_NAME} --depth=0 2>/dev/null | grep ${PACKAGE_NAME} | sed 's/.*@//' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1" 2>/dev/null || echo "unknown")
+INSTALLED_VERSION=$(ssh -n ${REMOTE_HOST} "docker exec ${CONTAINER_NAME} npm list ${PACKAGE_NAME} --depth=0 2>/dev/null | grep ${PACKAGE_NAME} | sed 's/.*@//' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1" 2>/dev/null || echo "unknown")
 echo -e "${YELLOW}🔍 Installed version: ${INSTALLED_VERSION}${NC}"
 echo ""
 
@@ -34,7 +34,7 @@ if [ "$INSTALLED_VERSION" = "$LOCAL_VERSION" ]; then
     echo -e "${YELLOW}⚠️  Version ${LOCAL_VERSION} is already installed on the server.${NC}"
     echo -e "${YELLOW}   You may not have any new changes to deploy.${NC}"
     echo ""
-    read -p "Continue anyway? [y/N] " CONFIRM
+    read -r -p "Continue anyway? [y/N] " CONFIRM || CONFIRM="n"
     if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
         echo "Aborted."
         exit 0
@@ -61,7 +61,7 @@ echo ""
 
 # ── Step 4: Clean up old .tgz files on the server ────────────────────────────
 echo -e "${YELLOW}🔍 Checking for old versions on server...${NC}"
-OLD_FILES=$(ssh ${REMOTE_HOST} "ls ${REMOTE_DIR}/${PACKAGE_FILENAME}-*.tgz 2>/dev/null || true")
+OLD_FILES=$(ssh -n ${REMOTE_HOST} "ls ${REMOTE_DIR}/${PACKAGE_FILENAME}-*.tgz 2>/dev/null || true")
 
 if [ -z "$OLD_FILES" ]; then
     echo -e "${GREEN}✓ No old versions found on server${NC}"
@@ -69,9 +69,9 @@ else
     echo "Found these files on the server:"
     echo "$OLD_FILES" | while read -r f; do echo "  $f"; done
     echo ""
-    read -p "Delete all old versions from server before installing? [y/N] " CONFIRM
+    read -r -p "Delete all old versions from server before installing? [y/N] " CONFIRM || CONFIRM="n"
     if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
-        ssh ${REMOTE_HOST} "rm -f ${REMOTE_DIR}/${PACKAGE_FILENAME}-*.tgz"
+        ssh -n ${REMOTE_HOST} "rm -f ${REMOTE_DIR}/${PACKAGE_FILENAME}-*.tgz"
         echo -e "${GREEN}✓ Old versions removed${NC}"
     else
         echo -e "${YELLOW}⚠️  Skipping cleanup — old files will remain on server${NC}"
@@ -87,13 +87,13 @@ echo ""
 
 # ── Step 6: Install inside Docker container ───────────────────────────────────
 echo -e "${YELLOW}🐳 Installing inside Docker container '${CONTAINER_NAME}'...${NC}"
-ssh ${REMOTE_HOST} "cd ${REMOTE_DIR} && docker exec ${CONTAINER_NAME} npm install ${TGZ_FILE}"
+ssh -n ${REMOTE_HOST} "cd ${REMOTE_DIR} && docker exec ${CONTAINER_NAME} npm install ${TGZ_FILE}"
 echo -e "${GREEN}✓ Installed${NC}"
 echo ""
 
 # ── Step 7: Restart Homebridge ────────────────────────────────────────────────
 echo -e "${YELLOW}🔄 Restarting Homebridge container...${NC}"
-ssh ${REMOTE_HOST} "docker restart ${CONTAINER_NAME}"
+ssh -n ${REMOTE_HOST} "docker restart ${CONTAINER_NAME}"
 echo -e "${GREEN}✓ Restarted${NC}"
 echo ""
 
