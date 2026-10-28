@@ -91,6 +91,7 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
           batChargeLevel: EufyRobovacMatterAccessory.computeChargeLevel(EufyRobovacMatterAccessory.safeBatteryLevel(robovac)),
           batReplaceability: 1,
           batChargeState: EufyRobovacMatterAccessory.computeChargeState(robovac),
+          batFunctionalWhileCharging: true,
         },
 
         rvcRunMode: {
@@ -223,12 +224,16 @@ export class EufyRobovacMatterAccessory extends BaseMatterAccessory {
 
   private async handleIdentify(request: MatterRequests.IdentifyRequest): Promise<void> {
     this.logInfo(`identify requested (identifyTime=${request.identifyTime}s) — playing sound to locate`);
-    this.ensureConnected();
+    if (!this.robovac.connected) {
+      this.logWarn('identify skipped — RoboVac is not connected');
+      return;
+    }
     try {
       await this.robovac.locate(true);
     } catch (error: unknown) {
-      this.logError('Failed to locate RoboVac:', error);
-      throw error;
+      // Log but don't throw — throwing from a Matter handler causes Apple Home
+      // to mark the entire accessory as "No Response"
+      this.logWarn('identify locate failed (non-fatal):', error);
     }
   }
 

@@ -432,20 +432,20 @@ describe('EufyRobovacMatterAccessory', () => {
       expect(robovac.locate).toHaveBeenCalledWith(true);
     });
 
-    it('should throw when disconnected', async () => {
+    it('should skip gracefully when disconnected (no throw)', async () => {
       const accessory = makeAccessory({}, { connected: false });
-      await expect(
-        accessory.handlers!.identify.identify({ identifyTime: 5 }),
-      ).rejects.toThrow();
+      // Should NOT throw — throwing from identify causes Apple Home "No Response"
+      await accessory.handlers!.identify.identify({ identifyTime: 5 });
+      expect(robovac.locate).not.toHaveBeenCalled();
     });
 
-    it('should rethrow errors from robovac.locate()', async () => {
+    it('should catch errors from robovac.locate() without rethrowing', async () => {
       const accessory = makeAccessory();
       robovac.connected = true;
       robovac.locate = vi.fn().mockRejectedValue(new Error('locate failed'));
-      await expect(
-        accessory.handlers!.identify.identify({ identifyTime: 5 }),
-      ).rejects.toThrow('locate failed');
+      // Should NOT throw — errors are logged but swallowed to prevent "No Response"
+      await accessory.handlers!.identify.identify({ identifyTime: 5 });
+      expect(robovac.locate).toHaveBeenCalledWith(true);
     });
   });
 
